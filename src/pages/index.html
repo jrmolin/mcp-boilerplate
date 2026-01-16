@@ -3,33 +3,230 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Welcome to Better Prompts</title>
+    <title>OpenJSCAD Worker MVP</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
     </style>
 </head>
-<body class="bg-slate-50 flex flex-col items-center justify-center min-h-screen p-4 sm:p-6 antialiased">
-    <div class="w-full max-w-lg">
-
-        <div class="text-center mb-8">
-            <h1 class="text-2xl sm:text-3xl font-bold text-gray-800">Welcome to MCP Boilerplate</h1>
-        </div>
-
-        <div class="bg-white border border-gray-200 rounded-xl shadow-2xs">
-            <div class="p-5 sm:p-7">
-                <p class="text-md text-gray-600 text-center">
-                    This is a simple example of an index page for the MCP boilerplate.
-                </p>
+<body class="bg-slate-50 min-h-screen p-4 sm:p-6 antialiased">
+    <div class="mx-auto w-full max-w-6xl space-y-6">
+        <div class="flex items-end justify-between gap-4">
+            <div>
+                <h1 class="text-2xl sm:text-3xl font-bold text-slate-900">OpenJSCAD Worker MVP</h1>
+                <p class="mt-1 text-sm text-slate-600">Paste or edit a safe JSON “shape recipe”, preview it, then export STL/OBJ.</p>
+            </div>
+            <div class="text-right">
+                <a class="text-sm text-blue-700 hover:underline" href="/sse">MCP SSE endpoint</a>
             </div>
         </div>
 
-        <div class="text-center mt-6">
-            <p class="text-xs text-gray-600">
-                Some Ts and Cs here. Maybe a link to a privacy policy.
-            </p>
-        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="bg-white border border-slate-200 rounded-xl shadow-sm">
+                <div class="p-4 sm:p-5 border-b border-slate-200">
+                    <div class="flex items-center justify-between">
+                        <h2 class="font-semibold text-slate-900">Shape recipe (v1)</h2>
+                        <div class="flex gap-2">
+                            <button id="renderBtn" class="px-3 py-2 text-sm font-medium rounded-lg bg-slate-900 text-white hover:bg-slate-800">Render preview</button>
+                            <button id="dlStlBtn" class="px-3 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700">Download STL</button>
+                            <button id="dlObjBtn" class="px-3 py-2 text-sm font-medium rounded-lg bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100">Download OBJ</button>
+                        </div>
+                    </div>
+                    <p class="mt-2 text-xs text-slate-500">This uses <code class="font-mono">/api/jscad/export</code> (POST). No arbitrary JS evaluation.</p>
+                </div>
+                <div class="p-4 sm:p-5 space-y-3">
+                    <textarea id="recipe" class="w-full h-96 font-mono text-xs rounded-lg border border-slate-200 p-3 focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                    <div id="status" class="text-sm text-slate-700"></div>
+                    <pre id="error" class="hidden text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-3 overflow-auto"></pre>
+                </div>
+            </div>
 
+            <div class="bg-white border border-slate-200 rounded-xl shadow-sm">
+                <div class="p-4 sm:p-5 border-b border-slate-200">
+                    <h2 class="font-semibold text-slate-900">3D preview</h2>
+                    <p class="mt-2 text-xs text-slate-500">Preview loads an STL exported from the recipe.</p>
+                </div>
+                <div class="p-0">
+                    <div id="viewer" class="w-full h-[520px] bg-slate-100 rounded-b-xl"></div>
+                </div>
+            </div>
+        </div>
     </div>
+
+    <script type="module">
+        import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+        import { OrbitControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+        import { STLLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/STLLoader.js';
+
+        const recipeEl = document.getElementById('recipe');
+        const statusEl = document.getElementById('status');
+        const errorEl = document.getElementById('error');
+
+        const viewerEl = document.getElementById('viewer');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xf1f5f9);
+        const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 5000);
+        camera.position.set(140, 120, 140);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        viewerEl.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        const hemi = new THREE.HemisphereLight(0xffffff, 0x334155, 0.9);
+        scene.add(hemi);
+        const dir = new THREE.DirectionalLight(0xffffff, 0.7);
+        dir.position.set(1, 2, 1);
+        scene.add(dir);
+
+        const grid = new THREE.GridHelper(300, 30, 0x94a3b8, 0xcbd5e1);
+        grid.position.y = -40;
+        scene.add(grid);
+
+        let currentMesh = null;
+
+        function setStatus(text) {
+            statusEl.textContent = text || '';
+        }
+
+        function showError(text) {
+            if (!text) {
+                errorEl.classList.add('hidden');
+                errorEl.textContent = '';
+                return;
+            }
+            errorEl.classList.remove('hidden');
+            errorEl.textContent = text;
+        }
+
+        function resize() {
+            const w = viewerEl.clientWidth || 1;
+            const h = viewerEl.clientHeight || 1;
+            camera.aspect = w / h;
+            camera.updateProjectionMatrix();
+            renderer.setSize(w, h, false);
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        function animate() {
+            controls.update();
+            renderer.render(scene, camera);
+            requestAnimationFrame(animate);
+        }
+        animate();
+
+        const defaultRecipe = {
+            version: 1,
+            units: "mm",
+            name: "demo_bracket",
+            root: {
+                type: "union",
+                children: [
+                    { type: "cuboid", size: [80, 20, 10], center: [0, 0, 0] },
+                    {
+                        type: "translate",
+                        offset: [0, 0, 10],
+                        child: { type: "cylinder", height: 20, radius: 8, center: [0, 0, 0] }
+                    }
+                ]
+            }
+        };
+        recipeEl.value = JSON.stringify(defaultRecipe, null, 2);
+
+        async function exportFile(format, download = false) {
+            showError('');
+            setStatus(`Exporting ${format.toUpperCase()}...`);
+            let recipe;
+            try {
+                recipe = JSON.parse(recipeEl.value);
+            } catch (e) {
+                setStatus('');
+                showError(`Invalid JSON in recipe textarea: ${e?.message || e}`);
+                throw e;
+            }
+
+            const res = await fetch(`/api/jscad/export?download=${download ? '1' : '0'}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ recipe, format })
+            });
+
+            if (!res.ok) {
+                const text = await res.text();
+                setStatus('');
+                showError(text);
+                throw new Error(text);
+            }
+
+            const buf = await res.arrayBuffer();
+            const filename = (res.headers.get('content-disposition') || '').match(/filename="([^"]+)"/)?.[1] || `model.${format}`;
+            const mime = res.headers.get('content-type') || 'application/octet-stream';
+            const bbox = res.headers.get('x-jscad-bounding-box');
+            const nodeCount = res.headers.get('x-jscad-node-count');
+            setStatus(`OK • ${filename} • nodes=${nodeCount || '?'} • bbox=${bbox || '?'}`);
+            return { buf, filename, mime };
+        }
+
+        async function renderPreview() {
+            const { buf } = await exportFile('stl', false);
+            const loader = new STLLoader();
+            const geometry = loader.parse(buf);
+            geometry.computeVertexNormals();
+
+            if (currentMesh) {
+                scene.remove(currentMesh);
+                currentMesh.geometry.dispose();
+                currentMesh.material.dispose();
+                currentMesh = null;
+            }
+
+            const material = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.45, metalness: 0.05 });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.rotation.x = -Math.PI / 2;
+
+            // Center mesh
+            geometry.computeBoundingBox();
+            const box = geometry.boundingBox;
+            const center = new THREE.Vector3();
+            box.getCenter(center);
+            mesh.position.sub(center);
+
+            scene.add(mesh);
+            currentMesh = mesh;
+        }
+
+        function downloadBlob(buf, filename, mime) {
+            const blob = new Blob([buf], { type: mime });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        }
+
+        document.getElementById('renderBtn').addEventListener('click', async () => {
+            try {
+                await renderPreview();
+            } catch {}
+        });
+        document.getElementById('dlStlBtn').addEventListener('click', async () => {
+            try {
+                const { buf, filename, mime } = await exportFile('stl', true);
+                downloadBlob(buf, filename, mime);
+            } catch {}
+        });
+        document.getElementById('dlObjBtn').addEventListener('click', async () => {
+            try {
+                const { buf, filename, mime } = await exportFile('obj', true);
+                downloadBlob(buf, filename, mime);
+            } catch {}
+        });
+    </script>
 </body>
 </html> 

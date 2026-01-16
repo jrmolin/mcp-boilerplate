@@ -13,6 +13,15 @@ This project helps you create your own remote MCP server on Cloudflare with user
 - Payment processing with Stripe
 - The ability to create both free and paid MCP tools
 
+## OpenJSCAD MVP (this fork)
+
+This workspace adds a minimal **text-to-3D pipeline** built around a safe JSON “shape recipe”:
+
+- **UI**: visit `/` to edit a recipe, preview the model, and download STL/OBJ
+- **API**: `POST /api/jscad/export`
+- **MCP tool**: `jscad_export`
+- **LLM prompt template**: see `docs/llm-prompt.md`
+
 ## Setup Checklist
 
 Before starting, make sure you have:

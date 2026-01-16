@@ -8,6 +8,8 @@ import {
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import stripeWebhookHandler from "./webhooks/stripe";
 import * as tools from './tools';
+import { JscadRecipeSchema, buildGeometryFromRecipe } from "./jscad/recipe";
+import { exportGeometryToFile } from "./jscad/export";
 
 type State = PaymentState & {};
 
@@ -27,6 +29,7 @@ export class BoilerplateMCP extends PaidMcpAgent<Env, State, AgentProps> {
 		// Example free tools (that don't require payment but do require a logged in user)
 		tools.addTool(this);
 		tools.calculateTool(this);
+		tools.jscadTool(this, { OAUTH_KV: this.env.OAUTH_KV });
 
 		// Example of a free tool that checks for active subscriptions and the status of the logged in user's Stripe customer ID
 		tools.checkPaymentHistoryTool(this, {
@@ -68,6 +71,11 @@ export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		const url = new URL(request.url);
 		const path = url.pathname;
+		const corsHeaders = {
+			"Access-Control-Allow-Origin": "*",
+			"Access-Control-Allow-Methods": "POST, OPTIONS",
+			"Access-Control-Allow-Headers": "Content-Type",
+		};
 		
 		// Handle homepage
 		if (path === "/" || path === "") {
@@ -85,6 +93,58 @@ export default {
 			return new Response(successPage.default, {
 				headers: { "Content-Type": "text/html" },
 			});
+		}
+
+		// Export a model from a safe JSON recipe (MVP)
+		if (path === "/api/jscad/export") {
+			if (request.method === "OPTIONS") {
+				return new Response(null, { status: 204, headers: corsHeaders });
+			}
+			if (request.method !== "POST") {
+				return new Response("Method Not Allowed", { status: 405, headers: corsHeaders });
+			}
+
+			let json: unknown;
+			try {
+				json = await request.json();
+			} catch {
+				return new Response(JSON.stringify({ ok: false, error: "Invalid JSON body" }), {
+					status: 400,
+					headers: { "Content-Type": "application/json", ...corsHeaders },
+				});
+			}
+
+			const parsed = JscadRecipeSchema.safeParse((json as any)?.recipe ?? json);
+			const format = ((json as any)?.format ?? "stl") as "stl" | "obj";
+
+			if (!parsed.success) {
+				return new Response(
+					JSON.stringify({ ok: false, error: "Invalid recipe", issues: parsed.error.issues }, null, 2),
+					{ status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+				);
+			}
+
+			try {
+				const { geometry, boundingBox, nodeCount } = buildGeometryFromRecipe(parsed.data);
+				const file = exportGeometryToFile(geometry, format, parsed.data.name);
+				const download = url.searchParams.get("download") === "1";
+				const disposition = download ? "attachment" : "inline";
+
+				return new Response(file.bytes, {
+					headers: {
+						"Content-Type": file.mime,
+						"Content-Disposition": `${disposition}; filename="${file.filename}"`,
+						"X-JSCAD-Node-Count": String(nodeCount),
+						"X-JSCAD-Bounding-Box": JSON.stringify(boundingBox),
+						...corsHeaders,
+					},
+				});
+			} catch (e) {
+				return new Response(
+					JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) }, null, 2),
+					{ status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }
+				);
+			}
 		}
 		
 		// Handle webhook
