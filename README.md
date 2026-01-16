@@ -22,6 +22,10 @@ This workspace adds a minimal **text-to-3D pipeline** built around a safe JSON â
 - **MCP tool**: `jscad_export`
 - **LLM prompt template**: see `docs/llm-prompt.md`
 
+### Security notes
+
+If you run `npm audit`, you may see **unresolved moderate advisories** in transitive dev dependencies (via the Stripe agent toolkit). We track reachability and mitigations in `docs/security.md`.
+
 ## Setup Checklist
 
 Before starting, make sure you have:
