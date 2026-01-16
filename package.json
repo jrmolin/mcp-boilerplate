@@ -25,5 +25,8 @@
   "dependencies": {
     "@jscad/io": "^2.4.12",
     "@jscad/modeling": "^2.12.6"
+  },
+  "overrides": {
+    "undici": "7.18.2"
   }
 }

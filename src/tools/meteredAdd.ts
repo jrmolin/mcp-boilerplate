@@ -14,7 +14,8 @@ export function meteredAddTool(
 		throw new Error("No env provided");
 	}
 	
-	agent.paidTool(
+	// NOTE: avoid deep generic instantiation issues from upstream types
+	(agent as any).paidTool(
 		"metered_add",
 		"Adds two numbers together for metered usage.",
 		{ a: z.number(), b: z.number() },

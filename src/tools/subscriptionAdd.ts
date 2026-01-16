@@ -18,7 +18,8 @@ export function subscriptionTool(
 		throw new Error("No env provided");
 	}
 	
-	agent.paidTool(
+	// NOTE: avoid deep generic instantiation issues from upstream types
+	(agent as any).paidTool(
 		"subscription_add",
 		"Adds two numbers together for paid subscribers.",
 		{ a: z.number(), b: z.number() },

@@ -18,7 +18,8 @@ export function onetimeAddTool(
 		throw new Error("No env provided");
 	}
 	
-	agent.paidTool(
+	// NOTE: avoid deep generic instantiation issues from upstream types
+	(agent as any).paidTool(
 		"onetime_add",
 		"Adds two numbers together for one-time payment.",
 		{ a: z.number(), b: z.number() },
